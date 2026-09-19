@@ -25,6 +25,9 @@ try:
 except ImportError:
     raise SystemExit("pip install stripe")
 
+StripeError = getattr(stripe, "StripeError", None) or getattr(stripe.error, "StripeError")
+SignatureVerificationError = getattr(stripe, "SignatureVerificationError", None) or getattr(stripe.error, "SignatureVerificationError")
+
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 ALLOWED_ORIGINS = os.environ.get(
@@ -123,7 +126,7 @@ class CheckoutHandler(BaseHTTPRequestHandler):
 
             self._json(200, {"url": session.url, "sessionId": session.id})
 
-        except stripe.error.StripeError as e:
+        except StripeError as e:
             self._json(500, {"error": str(e)})
 
     # ── Webhook ───────────────────────────────
@@ -134,7 +137,7 @@ class CheckoutHandler(BaseHTTPRequestHandler):
         if WEBHOOK_SECRET:
             try:
                 event = stripe.Webhook.construct_event(raw, sig, WEBHOOK_SECRET)
-            except (stripe.error.SignatureVerificationError, ValueError):
+            except (SignatureVerificationError, ValueError):
                 return self._json(400, {"error": "invalid signature"})
         else:
             try:
@@ -180,7 +183,7 @@ class CheckoutHandler(BaseHTTPRequestHandler):
                 return_url=return_url,
             )
             self._json(200, {"url": session.url})
-        except stripe.error.StripeError as e:
+        except StripeError as e:
             self._json(500, {"error": str(e)})
 
     # ── Subscription Status ───────────────────
@@ -200,7 +203,7 @@ class CheckoutHandler(BaseHTTPRequestHandler):
                         "current_period_end": sub["current_period_end"],
                     })
             self._json(200, {"subscriptions": active})
-        except stripe.error.StripeError as e:
+        except StripeError as e:
             self._json(500, {"error": str(e)})
 
 
