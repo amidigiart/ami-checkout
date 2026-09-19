@@ -29,6 +29,7 @@ StripeError = getattr(stripe, "StripeError", None) or getattr(stripe.error, "Str
 SignatureVerificationError = getattr(stripe, "SignatureVerificationError", None) or getattr(stripe.error, "SignatureVerificationError")
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
+stripe.api_version = "2025-06-30.basil"
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS",
