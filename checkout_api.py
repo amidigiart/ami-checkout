@@ -34,7 +34,7 @@ except ImportError:
 StripeError = getattr(stripe, "StripeError", None) or getattr(stripe.error, "StripeError")
 SignatureVerificationError = getattr(stripe, "SignatureVerificationError", None) or getattr(stripe.error, "SignatureVerificationError")
 
-VERSION = "2026-09-24"
+VERSION = "2026-09-24.2"
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -86,6 +86,17 @@ def period_end(sub: dict):
     items = (sub.get("items") or {}).get("data") or []
     ends = [i.get("current_period_end") for i in items if i.get("current_period_end")]
     return max(ends) if ends else None
+
+
+def known_customer(customer_id: str | None) -> str | None:
+    # A customer saved in test mode does not exist in live mode (and vice versa); treat it as absent.
+    if not customer_id:
+        return None
+    try:
+        c = stripe.Customer.retrieve(customer_id)
+        return None if getattr(c, "deleted", False) else customer_id
+    except StripeError:
+        return None
 
 
 def upsert_subscription(user_id: str, sub: dict, deleted: bool = False) -> None:
@@ -216,6 +227,7 @@ class CheckoutHandler(BaseHTTPRequestHandler):
                     existing = rows[0]["stripe_customer_id"] if rows and rows[0].get("stripe_customer_id") else None
                 except Exception:
                     pass
+                existing = known_customer(existing)
                 if existing:
                     params["customer"] = existing
                 elif user.get("email"):
@@ -273,7 +285,7 @@ class CheckoutHandler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "return url not allowed"})
         try:
             rows = supabase("GET", f"/rest/v1/subscriptions?user_id=eq.{quote(user['id'])}&select=stripe_customer_id")
-            customer = rows[0]["stripe_customer_id"] if rows else None
+            customer = known_customer(rows[0]["stripe_customer_id"] if rows else None)
             if not customer:
                 return self._json(404, {"error": "no subscription"})
             session = stripe.billing_portal.Session.create(customer=customer, return_url=return_url)
