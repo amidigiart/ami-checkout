@@ -47,6 +47,8 @@ ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "https://amistampai.com"
 ).split(",") if o.strip()]
 PORT = int(os.environ.get("PORT", "8080"))
+# Apps whose checkout is switched off, e.g. while Stripe is still on test keys (comma-separated app ids)
+PAUSED_APPS = {a.strip() for a in os.environ.get("PAYMENTS_PAUSED", "").split(",") if a.strip()}
 ACCOUNT_APPS = {"amistampai"}          # apps whose plans are stored in Supabase
 ACTIVE_STATUSES = {"active", "trialing"}
 
@@ -186,6 +188,8 @@ class CheckoutHandler(BaseHTTPRequestHandler):
         success_url = data.get("success_url")
         cancel_url = data.get("cancel_url") or success_url
         app = data.get("app") or ""
+        if app in PAUSED_APPS:
+            return self._json(503, {"error": "payments paused"})
         mode = data.get("mode", "subscription")
         if mode not in ("subscription", "payment"):
             return self._json(400, {"error": "invalid mode"})
