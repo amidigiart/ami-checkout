@@ -51,6 +51,7 @@ PORT = int(os.environ.get("PORT", "8080"))
 PAUSED_APPS = {a.strip() for a in os.environ.get("PAYMENTS_PAUSED", "").split(",") if a.strip()}
 ACCOUNT_APPS = {"amistampai"}          # apps whose plans are stored in Supabase
 ACTIVE_STATUSES = {"active", "trialing"}
+STAMP_PACKS = {"stamp-pack-100": 100}   # one-time price lookup key -> stamps credited
 
 
 # ── helpers ───────────────────────────────────
@@ -68,6 +69,20 @@ def supabase(method: str, path: str, body=None, token: str | None = None, prefer
     with urllib.request.urlopen(req, timeout=15) as r:
         data = r.read()
         return json.loads(data) if data else None
+
+
+def add_stamp_pack(user_id: str, stamps: int, session_id: str) -> None:
+    """Credit a paid pack. Stripe may deliver the same event twice; the unique session id makes that a no-op."""
+    try:
+        supabase("POST", "/rest/v1/stamp_packs",
+                 [{"user_id": user_id, "stamps_count": stamps, "stripe_session_id": session_id, "payment_method": "card"}],
+                 prefer="return=minimal")
+        print(f"STAMP PACK: user={user_id} stamps={stamps} session={session_id}")
+    except urllib.error.HTTPError as e:
+        if e.code == 409:                     # already credited for this session
+            print(f"STAMP PACK duplicate ignored: session={session_id}")
+            return
+        raise
 
 
 def same_origin_allowed(url: str | None) -> bool:
@@ -211,7 +226,7 @@ class CheckoutHandler(BaseHTTPRequestHandler):
             if not prices.data:
                 return self._json(404, {"error": f"price not found: {lookup_key}"})
 
-            metadata = {"lookup_key": lookup_key, "app": app}
+            metadata = {"lookup_key": lookup_key, "app": app, "quantity": str(quantity)}
             params = dict(
                 mode=mode,
                 line_items=[{"price": prices.data[0].id, "quantity": quantity}],
@@ -266,6 +281,10 @@ class CheckoutHandler(BaseHTTPRequestHandler):
             elif event_type == "checkout.session.completed":
                 md = obj.get("metadata") or {}
                 print(f"CHECKOUT COMPLETED: app={md.get('app')} user={obj.get('client_reference_id')} mode={obj.get('mode')}")
+                stamps = STAMP_PACKS.get(md.get("lookup_key", ""))
+                if (md.get("app") in ACCOUNT_APPS and md.get("user_id") and stamps
+                        and obj.get("mode") == "payment" and obj.get("payment_status") == "paid"):
+                    add_stamp_pack(md["user_id"], stamps * int(md.get("quantity") or 1), obj.get("id"))
             elif event_type == "invoice.payment_failed":
                 print(f"PAYMENT FAILED: customer={obj.get('customer')}")
         except Exception as e:           # let Stripe retry on storage errors
